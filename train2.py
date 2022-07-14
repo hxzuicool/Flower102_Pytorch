@@ -3,17 +3,12 @@ import torch
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 import torch.utils.data
-import scipy.io
-import shutil
 import torch.nn as nn
 import time
-import matplotlib.pyplot as plt
 import torchvision.datasets as datasets
 import os
+import networkStructure
 
-
-# 选择设备
-device = torch.device("cuda:0")
 # 对三种数据集进行不同预处理，对训练数据进行加强
 data_transforms = {
     'train': transforms.Compose([
@@ -40,49 +35,6 @@ data_transforms = {
     ])
 }
 
-# 数据目录
-data_dir = "./data/flowers-102/"
-
-# 获取三个数据集
-image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x),
-                                          data_transforms[x]) for x in ['train', 'valid', 'test']}
-traindataset = image_datasets['train']
-validdataset = image_datasets['valid']
-testdataset = image_datasets['test']
-
-batch_size = 50
-dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size,
-                                              shuffle=True, num_workers=10) for x in ['train', 'valid', 'test']}
-
-# print(dataloaders)
-traindataloader = dataloaders['train']
-validdataloader = dataloaders['valid']
-testdataloader = dataloaders['test']
-
-dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'valid', 'test']}
-
-
-# 使用resnet152的网络结构，最后一层全连接重写输出102
-class Net(nn.Module):
-    def __init__(self, model):
-        super(Net, self).__init__()
-        self.resnet = nn.Sequential(*list(model.children())[:-1])
-        # 可以选择冻结卷积层
-        # for p in self.parameters():
-        #     p.requires_grad = False
-        self.fc = nn.Linear(in_features=2048, out_features=102)
-
-    def forward(self, x):
-        x = self.resnet(x)
-        x = x.view(x.shape[0], -1)
-        x = self.fc(x)
-        return x
-
-
-resnet152 = torchvision.models.resnet152(weights=torchvision.models.ResNet152_Weights.IMAGENET1K_V2)
-
-net = Net(resnet152)
-
 
 def valid_model(model, criterion):
     best_acc = 0.0
@@ -90,15 +42,13 @@ def valid_model(model, criterion):
 
     running_loss = 0.0
     running_corrects = 0
-    model = model.to(device)
+    model.eval()
     for inputs, labels in validdataloader:
         inputs = inputs.to(device)
         labels = labels.to(device)
-        model.eval()
         with torch.no_grad():
             outputs = model(inputs)
         loss = criterion(outputs, labels)
-
         _, preds = torch.max(outputs, 1)
         running_loss += loss.item()
         running_corrects += torch.sum(preds == labels)
@@ -117,11 +67,11 @@ def test_model(model, criterion):
 
     running_loss = 0.0
     running_corrects = 0
-    model = model.to(device)
+    model.eval()
     for inputs, labels in testdataloader:
         inputs = inputs.to(device)
         labels = labels.to(device)
-        model.eval()
+
         with torch.no_grad():
             outputs = model(inputs)
         loss = criterion(outputs, labels)
@@ -149,11 +99,11 @@ def train_model(model, criterion, optimizer, num_epochs=5):
 
         running_loss = 0.0
         running_corrects = 0
-        model = model.to(device)
+        model.train()
         for inputs, labels in traindataloader:
             inputs = inputs.to(device)
             labels = labels.to(device)
-            model.train()
+
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = criterion(outputs, labels)
@@ -183,11 +133,45 @@ def train_model(model, criterion, optimizer, num_epochs=5):
 
     return model
 
+
 if __name__ == '__main__':
+    lr = 0.01
+    momentum = 0.9
+    epochs = 16
+    batch_size = 50
+    num_works = 10
+
+    # 选择设备
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+    # 数据目录
+    data_dir = "./data/flowers-102/"
+
+    # 获取数据集
+    image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x),
+                                              data_transforms[x]) for x in ['train', 'valid', 'test']}
+    traindataset = image_datasets['train']
+    validdataset = image_datasets['valid']
+    testdataset = image_datasets['test']
+
+    dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size,
+                                                  shuffle=True, num_workers=num_works) for x in
+                   ['train', 'valid', 'test']}
+
+    traindataloader = dataloaders['train']
+    validdataloader = dataloaders['valid']
+    testdataloader = dataloaders['test']
+
+    dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'valid', 'test']}
+
+    resnet152 = torchvision.models.resnet152(weights=torchvision.models.ResNet152_Weights.IMAGENET1K_V2)
+
+    net = networkStructure.Net(resnet152)
+
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=0.01, momentum=0.9)
+    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, momentum=momentum)
     step_lr = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=10, gamma=0.1)
-    epochs = 48
+
     model = train_model(net, criterion, optimizer, epochs)
 
     valid_model(model, criterion)

@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 import torch.utils.data
 import torch.nn as nn
 import time
-
+import networkStructure
 
 # 对三种数据集进行不同预处理，对训练数据进行加强
 data_transforms = {
@@ -33,37 +33,6 @@ data_transforms = {
                              [0.229, 0.224, 0.225])
     ])
 }
-
-image_datasets = {x: torchvision.datasets.Flowers102(root='./data/test/', transform=data_transforms[x], download=True,
-                                                     split=x) for x in ['train', 'val', 'test']}
-train_dataset = image_datasets['train']
-valid_dataset = image_datasets['val']
-test_dataset = image_datasets['test']
-
-dataloaders = {x: torch.utils.data.DataLoader(dataset=image_datasets[x], batch_size=50, shuffle=True, num_workers=12)
-               for x in
-               ['train', 'val', 'test']}
-
-train_dataloader = dataloaders['train']
-valid_dataloader = dataloaders['val']
-test_dataloader = dataloaders['test']
-
-
-# 使用resnet152的网络结构，最后一层全连接重写输出102
-class Net(nn.Module):
-    def __init__(self, model):
-        super(Net, self).__init__()
-        self.resnet = nn.Sequential(*list(model.children())[:-1])
-        # 可以选择冻结卷积层
-        # for p in self.parameters():
-        #     p.requires_grad = False
-        self.fc = nn.Linear(in_features=2048, out_features=102)
-
-    def forward(self, x):
-        x = self.resnet(x)
-        x = x.view(x.shape[0], -1)
-        x = self.fc(x)
-        return x
 
 
 def train_model(model, criterion, optimizer, num_epochs=5):
@@ -164,22 +133,40 @@ def test_model(model, criterion):
 
 
 if __name__ == '__main__':
-    print(len(train_dataset))
-    print(len(valid_dataset))
-    print(len(test_dataset))
+    lr = 0.01
+    momentum = 0.9
+    epochs = 16
+    batch_size = 50
+
+    image_datasets = {
+        x: torchvision.datasets.Flowers102(root='./data/test/', transform=data_transforms[x], download=True,
+                                           split=x) for x in ['train', 'val', 'test']}
+    train_dataset = image_datasets['train']
+    valid_dataset = image_datasets['val']
+    test_dataset = image_datasets['test']
+
+    dataloaders = {
+        x: torch.utils.data.DataLoader(dataset=image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=12)
+        for x in ['train', 'val', 'test']}
+
+    train_dataloader = dataloaders['train']
+    valid_dataloader = dataloaders['val']
+    test_dataloader = dataloaders['test']
+
     # 选择设备
-    device = torch.device("cuda:0")
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val', 'test']}
 
     resnet152 = torchvision.models.resnet152(weights=torchvision.models.ResNet152_Weights.IMAGENET1K_V2)
 
-    net = Net(resnet152)
+    net = networkStructure.Net(resnet152)
     net.to(device)
+
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=0.01, momentum=0.9)
+    optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=lr, momentum=momentum)
     step_lr = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=10, gamma=0.1)
-    epochs = 48
+
     model = train_model(net, criterion, optimizer, epochs)
 
     valid_model(model, criterion)
